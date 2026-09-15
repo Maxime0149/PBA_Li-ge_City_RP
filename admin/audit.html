@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Journal d'audit — Administration PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav><span class="user" id="user-label"></span><a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a></nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html">Vue générale</a>
+    <a href="clients.html">Clients</a>
+    <a href="accounts.html">Comptes</a>
+    <a href="credits.html">Crédits</a>
+    <a href="news.html">Annonces</a>
+    <a href="branches.html">Agences</a>
+    <a href="audit.html" class="active">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="section-title"><h1>Journal d'audit</h1></div>
+    <p class="muted" style="margin-bottom:18px;">Historique immuable de toutes les actions sensibles. Ce journal ne peut être ni modifié ni supprimé, y compris par un administrateur.</p>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Date / heure</th><th>Utilisateur</th><th>Action</th><th>Objet</th><th>Détail</th></tr></thead>
+        <tbody id="audit-body"><tr><td colspan="5" class="muted">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+async function init(){
+  const me = await requireRole(['employe','responsable','directeur','administrateur']);
+  if (!me) return;
+  document.getElementById('user-label').textContent = `${me.prenom} ${me.nom} · ${me.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+
+  const { data, error } = await supabaseClient
+    .from('audit_logs')
+    .select('*, utilisateur:utilisateur_id(nom,prenom)')
+    .order('date_heure', { ascending:false })
+    .limit(200);
+  if (error) { console.error(error); return; }
+
+  document.getElementById('audit-body').innerHTML = (data || []).map(l => `
+    <tr>
+      <td>${new Date(l.date_heure).toLocaleString('fr-BE')}</td>
+      <td>${l.utilisateur ? l.utilisateur.prenom + ' ' + l.utilisateur.nom : 'Système'}</td>
+      <td>${l.action}</td>
+      <td>${l.objet_type || '—'}</td>
+      <td><code style="font-size:0.75rem;">${JSON.stringify(l.nouvelle_valeur || {}).slice(0,80)}</code></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">Aucune entrée.</td></tr>';
+}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crédits — Administration PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav><span class="user" id="user-label"></span><a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a></nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html">Vue générale</a>
+    <a href="clients.html">Clients</a>
+    <a href="accounts.html">Comptes</a>
+    <a href="credits.html" class="active">Crédits</a>
+    <a href="news.html">Annonces</a>
+    <a href="branches.html">Agences</a>
+    <a href="audit.html">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="section-title">
+      <h1>Demandes de crédit</h1>
+      <select id="filter-status" style="width:auto;">
+        <option value="">Tous les statuts</option>
+        <option value="en_attente">En attente</option>
+        <option value="en_analyse">En analyse</option>
+        <option value="accepte">Accepté</option>
+        <option value="refuse">Refusé</option>
+        <option value="termine">Terminé</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>Client</th><th>Type</th><th>Demandé</th><th>Taux</th><th>Durée</th><th>Statut</th><th></th></tr></thead>
+        <tbody id="credits-body"><tr><td colspan="7" class="muted">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="modal-process" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:100;">
+  <div class="card" style="width:100%; max-width:440px;">
+    <h3 style="margin-bottom:16px;">Traiter la demande</h3>
+    <form id="form-process">
+      <div class="field">
+        <label>Décision</label>
+        <select id="p-statut">
+          <option value="en_analyse">Mettre en analyse</option>
+          <option value="accepte">Accepter</option>
+          <option value="refuse">Refuser</option>
+          <option value="termine">Marquer comme terminé</option>
+        </select>
+      </div>
+      <div class="field"><label>Montant accordé (€)</label><input id="p-montant" type="number" step="0.01"></div>
+      <div class="field"><label>Taux (%)</label><input id="p-taux" type="number" step="0.01"></div>
+      <div class="field"><label>Mensualité (€)</label><input id="p-mensualite" type="number" step="0.01"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-process">Annuler</button>
+        <button type="submit" class="btn">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+let me = null;
+let processingCreditId = null;
+
+async function init(){
+  me = await requireRole(['employe','responsable','directeur','administrateur']);
+  if (!me) return;
+  document.getElementById('user-label').textContent = `${me.prenom} ${me.nom} · ${me.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+  document.getElementById('filter-status').addEventListener('change', (e) => loadCredits(e.target.value));
+  document.getElementById('btn-cancel-process').addEventListener('click', () => toggleModal(false));
+  document.getElementById('form-process').addEventListener('submit', submitProcess);
+  await loadCredits('');
+}
+
+async function loadCredits(statusFilter){
+  let q = supabaseClient.from('credits').select('*, client:client_id(nom,prenom,numero_client)').order('date_demande', { ascending:false });
+  if (statusFilter) q = q.eq('statut', statusFilter);
+  const { data, error } = await q;
+  if (error) { console.error(error); return; }
+
+  document.getElementById('credits-body').innerHTML = (data || []).map(c => `
+    <tr>
+      <td>${c.client ? c.client.prenom + ' ' + c.client.nom : '—'}</td>
+      <td>${c.type_credit}</td>
+      <td>${formatEUR(c.montant_demande)}</td>
+      <td>${c.taux ? c.taux + ' %' : '—'}</td>
+      <td>${c.duree_mois ? c.duree_mois + ' mois' : '—'}</td>
+      <td><span class="badge badge-${c.statut === 'accepte' ? 'ok' : c.statut === 'refuse' ? 'danger' : c.statut === 'termine' ? 'neutral' : 'warn'}">${c.statut.replace(/_/g,' ')}</span></td>
+      <td><button class="btn btn-sm btn-ghost" data-id="${c.id}">Traiter</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="7" class="muted">Aucune demande.</td></tr>';
+
+  document.querySelectorAll('#credits-body button[data-id]').forEach(btn =>
+    btn.addEventListener('click', () => { processingCreditId = btn.dataset.id; toggleModal(true); }));
+}
+
+function toggleModal(show){
+  document.getElementById('modal-process').style.display = show ? 'flex' : 'none';
+  if (!show) document.getElementById('form-process').reset();
+}
+
+async function submitProcess(e){
+  e.preventDefault();
+  const statut = document.getElementById('p-statut').value;
+  const montant = document.getElementById('p-montant').value;
+  const taux = document.getElementById('p-taux').value;
+  const mensualite = document.getElementById('p-mensualite').value;
+
+  const { error } = await supabaseClient.rpc('process_credit', {
+    p_credit_id: processingCreditId,
+    p_statut: statut,
+    p_montant_accorde: montant ? parseFloat(montant) : null,
+    p_taux: taux ? parseFloat(taux) : null,
+    p_mensualite: mensualite ? parseFloat(mensualite) : null
+  });
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Demande de crédit mise à jour.');
+  toggleModal(false);
+  loadCredits(document.getElementById('filter-status').value);
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comptes — Administration PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav><span class="user" id="user-label"></span><a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a></nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html">Vue générale</a>
+    <a href="clients.html">Clients</a>
+    <a href="accounts.html" class="active">Comptes</a>
+    <a href="credits.html">Crédits</a>
+    <a href="news.html">Annonces</a>
+    <a href="branches.html">Agences</a>
+    <a href="audit.html">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="section-title">
+      <h1>Comptes</h1>
+      <button class="btn" id="btn-new-account">+ Créer un compte</button>
+    </div>
+
+    <div class="field" style="max-width:420px;">
+      <input id="search" placeholder="Rechercher par numéro de compte…">
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <table>
+        <thead><tr><th>N° compte</th><th>Titulaire</th><th>Type</th><th>Solde</th><th>Statut</th><th></th></tr></thead>
+        <tbody id="accounts-body"><tr><td colspan="6" class="muted">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modale simplifiée (affichée/masquée en display) : ajustement de solde -->
+<div id="modal-adjust" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:100;">
+  <div class="card" style="width:100%; max-width:420px;">
+    <h3 style="margin-bottom:16px;">Ajuster le solde</h3>
+    <form id="form-adjust">
+      <div class="field">
+        <label>Montant (positif = crédit, négatif = débit)</label>
+        <input id="adjust-montant" type="number" step="0.01" required>
+      </div>
+      <div class="field">
+        <label>Motif</label>
+        <input id="adjust-motif" required>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="btn btn-ghost" id="btn-cancel-adjust">Annuler</button>
+        <button type="submit" class="btn">Valider</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+let me = null;
+let adjustAccountId = null;
+
+async function init(){
+  me = await requireRole(['employe','responsable','directeur','administrateur']);
+  if (!me) return;
+  document.getElementById('user-label').textContent = `${me.prenom} ${me.nom} · ${me.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+  document.getElementById('search').addEventListener('input', (e) => loadAccounts(e.target.value));
+  document.getElementById('btn-new-account').addEventListener('click', createAccountFlow);
+  document.getElementById('btn-cancel-adjust').addEventListener('click', () => toggleModal(false));
+  document.getElementById('form-adjust').addEventListener('submit', submitAdjust);
+  await loadAccounts('');
+}
+
+async function loadAccounts(query){
+  let q = supabaseClient.from('bank_accounts').select('*, client:client_id(nom,prenom,numero_client)').order('created_at', { ascending:false }).limit(100);
+  if (query) q = q.ilike('numero_compte', `%${query}%`);
+  const { data, error } = await q;
+  if (error) { console.error(error); return; }
+
+  document.getElementById('accounts-body').innerHTML = (data || []).map(a => `
+    <tr>
+      <td>${a.numero_compte}</td>
+      <td>${a.client ? a.client.prenom + ' ' + a.client.nom : '—'}</td>
+      <td>${a.type_compte.replace(/_/g,' ')}</td>
+      <td>${formatEUR(a.solde)}</td>
+      <td><span class="badge ${a.statut === 'actif' ? 'badge-ok' : a.statut === 'bloque' ? 'badge-danger' : 'badge-neutral'}">${a.statut}</span></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm btn-ghost" data-action="adjust" data-id="${a.id}">Ajuster</button>
+        <button class="btn btn-sm btn-ghost" data-action="toggle" data-id="${a.id}" data-status="${a.statut}">${a.statut === 'actif' ? 'Bloquer' : 'Débloquer'}</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="muted">Aucun compte trouvé.</td></tr>';
+
+  document.querySelectorAll('[data-action="adjust"]').forEach(btn =>
+    btn.addEventListener('click', () => { adjustAccountId = btn.dataset.id; toggleModal(true); }));
+  document.querySelectorAll('[data-action="toggle"]').forEach(btn =>
+    btn.addEventListener('click', () => toggleAccountStatus(btn.dataset.id, btn.dataset.status)));
+}
+
+function toggleModal(show){
+  document.getElementById('modal-adjust').style.display = show ? 'flex' : 'none';
+  if (!show) document.getElementById('form-adjust').reset();
+}
+
+async function submitAdjust(e){
+  e.preventDefault();
+  const montant = parseFloat(document.getElementById('adjust-montant').value);
+  const motif = document.getElementById('adjust-motif').value;
+  const { error } = await supabaseClient.rpc('admin_adjust_balance', {
+    p_account_id: adjustAccountId, p_montant: montant, p_motif: motif
+  });
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Solde ajusté et transaction enregistrée.');
+  toggleModal(false);
+  loadAccounts(document.getElementById('search').value);
+}
+
+async function toggleAccountStatus(accountId, currentStatus){
+  const next = currentStatus === 'actif' ? 'bloque' : 'actif';
+  const { error } = await supabaseClient.rpc('set_account_status', { p_account_id: accountId, p_statut: next });
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Statut du compte mis à jour.');
+  loadAccounts(document.getElementById('search').value);
+}
+
+async function createAccountFlow(){
+  const numeroClient = prompt('Numéro client du titulaire (ex: PBA-A1B2C3D4) :');
+  if (!numeroClient) return;
+  const { data: client, error: clientErr } = await supabaseClient
+    .from('profiles').select('id').eq('numero_client', numeroClient.trim()).single();
+  if (clientErr || !client) { toast('Client introuvable.'); return; }
+
+  const type = prompt('Type de compte : compte_a_vue / compte_epargne / compte_professionnel', 'compte_a_vue');
+  if (!type) return;
+
+  const { error } = await supabaseClient.from('bank_accounts').insert({ client_id: client.id, type_compte: type });
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Compte créé.');
+  loadAccounts('');
+}
+
+init();
+</script>
+</body>
+</html>

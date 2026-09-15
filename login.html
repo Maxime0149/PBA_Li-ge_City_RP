@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connexion — PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  body{ display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--navy); }
+  .auth-box{ background:var(--white); width:100%; max-width:380px; padding:38px 34px; border-radius:4px; }
+  .auth-box h1{ font-size:1.4rem; margin-bottom:6px; }
+  .auth-box p.sub{ color:var(--text-muted); font-size:0.9rem; margin-bottom:26px; }
+  .tabs{ display:flex; gap:6px; margin-bottom:24px; border-bottom:1px solid var(--line); }
+  .tab{ padding:8px 4px; font-size:0.88rem; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab.active{ color:var(--navy); border-bottom-color:var(--bronze); font-weight:600; }
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+  .error{ color:var(--danger); font-size:0.85rem; margin-top:10px; display:none; }
+</style>
+</head>
+<body>
+
+<div class="auth-box">
+  <h1>PBA</h1>
+  <p class="sub">Accédez à votre espace bancaire.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="connexion">Connexion</div>
+    <div class="tab" data-tab="inscription">Créer un compte</div>
+  </div>
+
+  <button type="button" id="btn-discord" style="width:100%; display:flex; align-items:center; justify-content:center; gap:10px; background:#5865F2; color:#fff; border:none; border-radius:3px; padding:11px 18px; font-family:var(--sans); font-weight:600; font-size:0.9rem; cursor:pointer; margin-bottom:22px;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A20 20 0 0 0 15.6 3l-.3.6a14 14 0 0 1 4.1 1.6 15.6 15.6 0 0 0-13 0A14 14 0 0 1 8.5 3.6L8.2 3A20 20 0 0 0 3.5 4.4C.9 8.3.2 12 .5 15.7A20 20 0 0 0 6.6 19l1-1.6a13 13 0 0 1-2.1-1c.2-.1.3-.3.5-.4a14.2 14.2 0 0 0 12 0l.5.4a13 13 0 0 1-2.1 1l1 1.6a20 20 0 0 0 6-3.3c.5-4.3-.6-8-2.9-11.3ZM8.6 13.6c-1 0-1.7-.9-1.7-1.9 0-1.1.8-2 1.7-2s1.8.9 1.7 2c0 1-.8 1.9-1.7 1.9Zm6.8 0c-.9 0-1.7-.9-1.7-1.9 0-1.1.8-2 1.7-2s1.7.9 1.7 2c0 1-.8 1.9-1.7 1.9Z"/></svg>
+    Continuer avec Discord
+  </button>
+
+  <div style="text-align:center; color:var(--text-muted); font-size:0.8rem; margin:-10px 0 20px;">ou avec un pseudo</div>
+
+  <div class="panel active" id="panel-connexion">
+    <form id="form-login">
+      <div class="field"><label for="l-pseudo">Pseudo RP</label><input id="l-pseudo" required></div>
+      <div class="field"><label for="l-pass">Mot de passe</label><input id="l-pass" type="password" required></div>
+      <button class="btn" type="submit" style="width:100%;">Se connecter</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </div>
+
+  <div class="panel" id="panel-inscription">
+    <form id="form-signup">
+      <div class="field"><label for="s-prenom">Prénom RP</label><input id="s-prenom" required></div>
+      <div class="field"><label for="s-nom">Nom RP</label><input id="s-nom" required></div>
+      <div class="field"><label for="s-pseudo">Pseudo RP</label><input id="s-pseudo" required></div>
+      <div class="field"><label for="s-pass">Mot de passe</label><input id="s-pass" type="password" minlength="6" required></div>
+      <button class="btn" type="submit" style="width:100%;">Créer mon compte</button>
+      <p class="error" id="signup-error"></p>
+    </form>
+  </div>
+</div>
+
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script>
+  document.getElementById('btn-discord').addEventListener('click', async () => {
+    const { error } = await signInWithDiscord();
+    if (error) toast('Erreur Discord : ' + error.message);
+  });
+
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  document.getElementById('form-login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('login-error');
+    errEl.style.display = 'none';
+    const email = document.getElementById('l-pseudo').value;
+    const pass = document.getElementById('l-pass').value;
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; submitBtn.textContent = 'Connexion…';
+    try {
+      const { error } = await signIn(email, pass);
+      if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+      // Redirige selon le rôle une fois le profil chargé
+      const profile = await getCurrentProfile();
+      if (profile && profile.role !== 'client') {
+        window.location.href = 'admin/index.html';
+      } else {
+        window.location.href = 'espace-client.html';
+      }
+    } catch (err) {
+      // Erreur réseau (ex: config.js pas encore renseigné avec ton vrai projet Supabase)
+      console.error('Erreur de connexion :', err);
+      errEl.textContent = "Impossible de contacter le serveur. Vérifie que assets/config.js contient bien l'URL et la clé de TON projet Supabase (pas les valeurs par défaut).";
+      errEl.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false; submitBtn.textContent = 'Se connecter';
+    }
+  });
+
+  document.getElementById('form-signup').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('signup-error');
+    errEl.style.display = 'none';
+    const prenom = document.getElementById('s-prenom').value;
+    const nom = document.getElementById('s-nom').value;
+    const email = document.getElementById('s-pseudo').value;
+    const pass = document.getElementById('s-pass').value;
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; submitBtn.textContent = 'Création…';
+    try {
+      const { error } = await signUp(email, pass, nom, prenom);
+      if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+      toast('Compte créé.');
+      window.location.href = 'espace-client.html';
+    } catch (err) {
+      // Erreur réseau (ex: config.js pas encore renseigné avec ton vrai projet Supabase)
+      console.error('Erreur d\'inscription :', err);
+      errEl.textContent = "Impossible de contacter le serveur. Vérifie que assets/config.js contient bien l'URL et la clé de TON projet Supabase (pas les valeurs par défaut).";
+      errEl.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false; submitBtn.textContent = 'Créer mon compte';
+    }
+  });
+</script>
+</body>
+</html>

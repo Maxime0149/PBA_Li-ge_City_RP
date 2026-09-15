@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PBA — Pacifique Banque &amp; Assurances</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  header{ position:sticky; top:0; z-index:50; background:rgba(245,243,238,0.92); backdrop-filter:blur(6px); border-bottom:1px solid var(--line); }
+  .nav{ display:flex; align-items:center; justify-content:space-between; padding:18px 0; }
+  .logo{ font-family:var(--serif); font-size:1.3rem; color:var(--navy); }
+  .logo span{ color:var(--bronze); }
+  .nav-links{ display:flex; gap:28px; }
+  .nav-links a{ font-size:0.92rem; }
+  .nav-links a:hover{ color:var(--bronze); }
+  .hero{ padding:90px 0 80px; }
+  .hero h1{ font-size:clamp(2rem,4vw,3rem); max-width:13ch; margin-bottom:20px; }
+  .hero p{ font-size:1.05rem; color:var(--text-muted); max-width:46ch; margin-bottom:28px; }
+  section{ padding:76px 0; }
+  .section-alt{ background:var(--bg-alt); }
+  .section-head{ margin-bottom:40px; border-bottom:1px solid var(--line); padding-bottom:20px; }
+  .agencies-grid, .news-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:24px; }
+  @media (max-width:900px){ .agencies-grid,.news-grid{ grid-template-columns:1fr 1fr; } }
+  @media (max-width:600px){ .agencies-grid,.news-grid,.nav-links{ display:none; } }
+  footer{ background:var(--navy-deep); color:rgba(255,255,255,0.7); padding:48px 0 26px; }
+  .footer-disclaimer{ font-size:0.8rem; color:rgba(255,255,255,0.5); max-width:60ch; margin-top:20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <div class="logo">PBA <span>·</span> Pacifique Banque &amp; Assurances</div>
+    <nav class="nav-links">
+      <a href="#comptes">Comptes</a>
+      <a href="#agences">Agences</a>
+      <a href="#actualites">Actualités</a>
+    </nav>
+    <div>
+      <a href="login.html" class="btn btn-ghost btn-sm">Se connecter</a>
+      <a href="login.html" class="btn btn-sm">Ouvrir un compte</a>
+    </div>
+  </div>
+</header>
+
+<section class="hero wrap">
+  <h1>Une banque pensée pour la vie quotidienne des Belges.</h1>
+  <p>PBA accompagne les particuliers, les indépendants et les entreprises à travers toute la Belgique, avec un espace client sécurisé pour suivre comptes, cartes et crédits en temps réel.</p>
+  <a href="login.html" class="btn">Accéder à mon espace</a>
+</section>
+
+<section id="agences" class="section-alt">
+  <div class="wrap">
+    <div class="section-head"><h2>Nos agences</h2></div>
+    <div class="agencies-grid" id="agencies-grid"><p class="muted">Chargement…</p></div>
+  </div>
+</section>
+
+<section id="actualites">
+  <div class="wrap">
+    <div class="section-head"><h2>Actualités</h2></div>
+    <div class="news-grid" id="news-grid"><p class="muted">Chargement…</p></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p style="font-family:var(--serif); color:var(--white); font-size:1.1rem;">PBA</p>
+    <p class="footer-disclaimer">PBA — Pacifique Banque &amp; Assurances est une banque fictive créée exclusivement dans le cadre d'un environnement GTA RP. Elle ne fournit aucun service bancaire ou financier réel.</p>
+  </div>
+</footer>
+
+<script src="assets/config.js"></script>
+<script>
+async function loadAgencies(){
+  const { data, error } = await supabaseClient.from('branches').select('*').eq('statut','actif').order('nom');
+  const grid = document.getElementById('agencies-grid');
+  if (error || !data || !data.length) { grid.innerHTML = '<p class="muted">Agences indisponibles pour le moment.</p>'; return; }
+  grid.innerHTML = data.map(a => `
+    <div class="card">
+      <h3 style="font-size:1rem; margin-bottom:8px;">${a.nom}</h3>
+      <p class="muted" style="font-size:0.88rem;">${a.adresse}</p>
+      <p class="muted" style="font-size:0.85rem; margin-top:6px;">${a.telephone || ''} ${a.horaires ? '· ' + a.horaires : ''}</p>
+    </div>
+  `).join('');
+}
+
+async function loadNews(){
+  const { data, error } = await supabaseClient.from('news').select('*').eq('statut','publie').order('date_publication', { ascending:false }).limit(6);
+  const grid = document.getElementById('news-grid');
+  if (error || !data || !data.length) { grid.innerHTML = '<p class="muted">Aucune actualité publiée pour le moment.</p>'; return; }
+  grid.innerHTML = data.map(n => `
+    <div class="card">
+      <h3 style="font-size:1rem; margin-bottom:8px;">${n.titre}</h3>
+      <p class="muted" style="font-size:0.88rem;">${n.contenu.slice(0,140)}${n.contenu.length > 140 ? '…' : ''}</p>
+    </div>
+  `).join('');
+}
+
+loadAgencies();
+loadNews();
+</script>
+</body>
+</html>

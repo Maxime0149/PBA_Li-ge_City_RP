@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agences — Administration PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav><span class="user" id="user-label"></span><a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a></nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html">Vue générale</a>
+    <a href="clients.html">Clients</a>
+    <a href="accounts.html">Comptes</a>
+    <a href="credits.html">Crédits</a>
+    <a href="news.html">Annonces</a>
+    <a href="branches.html" class="active">Agences</a>
+    <a href="audit.html">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="grid-2">
+      <div>
+        <div class="section-title"><h1>Agences</h1></div>
+        <div id="branches-list"></div>
+      </div>
+
+      <div>
+        <div class="section-title"><h2 id="form-title">Nouvelle agence</h2></div>
+        <div class="card">
+          <form id="form-branch">
+            <input type="hidden" id="b-id">
+            <div class="field"><label>Nom</label><input id="b-nom" required></div>
+            <div class="field"><label>Adresse</label><input id="b-adresse" required></div>
+            <div class="field"><label>Téléphone</label><input id="b-telephone"></div>
+            <div class="field"><label>Horaires</label><input id="b-horaires" placeholder="Lun–Ven 9h–17h"></div>
+            <div class="field"><label>Services (séparés par des virgules)</label><input id="b-services" placeholder="Comptes, Crédits, Assurances"></div>
+            <div class="field">
+              <label>Statut</label>
+              <select id="b-statut"><option value="actif">Actif</option><option value="ferme">Fermé</option></select>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <button class="btn" type="submit">Enregistrer</button>
+              <button class="btn btn-ghost" type="button" id="btn-reset">Nouvelle agence</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+let me = null;
+
+async function init(){
+  me = await requireRole(['directeur','administrateur']);
+  if (!me) return;
+  document.getElementById('user-label').textContent = `${me.prenom} ${me.nom} · ${me.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+  document.getElementById('form-branch').addEventListener('submit', saveBranch);
+  document.getElementById('btn-reset').addEventListener('click', resetForm);
+  await loadBranches();
+}
+
+async function loadBranches(){
+  const { data, error } = await supabaseClient.from('branches').select('*').order('nom');
+  if (error) { console.error(error); return; }
+  document.getElementById('branches-list').innerHTML = (data || []).map(b => `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="section-title" style="margin-bottom:6px;">
+        <h3 style="font-size:1rem;">${b.nom}</h3>
+        <span class="badge ${b.statut === 'actif' ? 'badge-ok' : 'badge-neutral'}">${b.statut}</span>
+      </div>
+      <p class="muted" style="font-size:0.85rem;">${b.adresse}</p>
+      <p class="muted" style="font-size:0.85rem;">${b.telephone || '—'} · ${b.horaires || '—'}</p>
+      <div style="margin-top:10px;">
+        <button class="btn btn-sm btn-ghost" data-id="${b.id}">Modifier</button>
+      </div>
+    </div>
+  `).join('') || '<p class="muted">Aucune agence.</p>';
+
+  document.querySelectorAll('#branches-list button[data-id]').forEach(btn =>
+    btn.addEventListener('click', () => loadForEdit(btn.dataset.id)));
+}
+
+async function loadForEdit(id){
+  const { data, error } = await supabaseClient.from('branches').select('*').eq('id', id).single();
+  if (error) return;
+  document.getElementById('form-title').textContent = 'Modifier l\'agence';
+  document.getElementById('b-id').value = data.id;
+  document.getElementById('b-nom').value = data.nom;
+  document.getElementById('b-adresse').value = data.adresse;
+  document.getElementById('b-telephone').value = data.telephone || '';
+  document.getElementById('b-horaires').value = data.horaires || '';
+  document.getElementById('b-services').value = (data.services || []).join(', ');
+  document.getElementById('b-statut').value = data.statut;
+}
+
+function resetForm(){
+  document.getElementById('form-branch').reset();
+  document.getElementById('b-id').value = '';
+  document.getElementById('form-title').textContent = 'Nouvelle agence';
+}
+
+async function saveBranch(e){
+  e.preventDefault();
+  const id = document.getElementById('b-id').value;
+  const payload = {
+    nom: document.getElementById('b-nom').value,
+    adresse: document.getElementById('b-adresse').value,
+    telephone: document.getElementById('b-telephone').value,
+    horaires: document.getElementById('b-horaires').value,
+    services: document.getElementById('b-services').value.split(',').map(s => s.trim()).filter(Boolean),
+    statut: document.getElementById('b-statut').value
+  };
+  const { error } = id
+    ? await supabaseClient.from('branches').update(payload).eq('id', id)
+    : await supabaseClient.from('branches').insert(payload);
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Agence enregistrée — visible immédiatement sur le site public.');
+  resetForm();
+  loadBranches();
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mon espace — PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Mon espace</div>
+  <nav>
+    <a href="index.html">Site public</a>
+    <a href="#" id="nav-notifs">Notifications <span id="notif-count"></span></a>
+    <span class="user" id="user-label"></span>
+    <a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a>
+  </nav>
+</div>
+
+<div class="wrap" style="padding:32px 28px;">
+
+  <div class="section-title">
+    <h1 id="welcome">Bienvenue</h1>
+  </div>
+
+  <!-- Comptes -->
+  <div class="section-title"><h2>Mes comptes</h2></div>
+  <div class="grid-3" id="accounts-grid"></div>
+
+  <!-- Cartes -->
+  <div class="section-title" style="margin-top:36px;"><h2>Mes cartes</h2></div>
+  <div class="grid-3" id="cards-grid"></div>
+
+  <!-- Virement -->
+  <div class="section-title" style="margin-top:36px;"><h2>Effectuer un virement</h2></div>
+  <div class="card" style="max-width:520px;">
+    <form id="form-transfer">
+      <div class="field">
+        <label for="t-source">Compte source</label>
+        <select id="t-source" required></select>
+      </div>
+      <div class="field">
+        <label for="t-dest">Numéro de compte destinataire</label>
+        <input id="t-dest" placeholder="BE00 0000 0000 0000" required>
+      </div>
+      <div class="field">
+        <label for="t-montant">Montant (€)</label>
+        <input id="t-montant" type="number" min="0.01" step="0.01" required>
+      </div>
+      <div class="field">
+        <label for="t-desc">Communication</label>
+        <input id="t-desc" placeholder="Ex: Loyer septembre">
+      </div>
+      <button class="btn" type="submit">Envoyer le virement</button>
+      <p class="error" id="transfer-error" style="color:var(--danger); font-size:0.85rem; margin-top:10px;"></p>
+    </form>
+  </div>
+
+  <!-- Transactions -->
+  <div class="section-title" style="margin-top:36px;"><h2>Dernières transactions</h2></div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Montant</th><th>Statut</th></tr></thead>
+      <tbody id="tx-body"><tr><td colspan="5" class="muted">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Crédits -->
+  <div class="section-title" style="margin-top:36px;"><h2>Mes crédits</h2></div>
+  <div class="card" id="credits-card">
+    <table>
+      <thead><tr><th>Type</th><th>Montant demandé</th><th>Montant accordé</th><th>Statut</th></tr></thead>
+      <tbody id="credits-body"><tr><td colspan="4" class="muted">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script>
+let currentProfile = null;
+let myAccounts = [];
+
+const STATUT_BADGES = {
+  actif:'badge-ok', bloque:'badge-danger', ferme:'badge-neutral',
+  en_attente:'badge-warn', en_analyse:'badge-info', accepte:'badge-ok', refuse:'badge-danger', termine:'badge-neutral',
+  validee:'badge-ok', refusee:'badge-danger', annulee:'badge-neutral'
+};
+function badge(statut){ return `<span class="badge ${STATUT_BADGES[statut] || 'badge-neutral'}">${statut.replace(/_/g,' ')}</span>`; }
+
+async function init(){
+  currentProfile = await requireRole(['client','employe','responsable','directeur','administrateur']);
+  if (!currentProfile) return;
+
+  document.getElementById('welcome').textContent = `Bonjour, ${currentProfile.prenom} ${currentProfile.nom}`;
+  document.getElementById('user-label').textContent = currentProfile.numero_client;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+
+  await loadAccounts();
+  await loadCards();
+  await loadTransactions();
+  await loadCredits();
+  await loadNotifCount();
+  subscribeRealtime();
+
+  document.getElementById('form-transfer').addEventListener('submit', onTransfer);
+}
+
+async function loadAccounts(){
+  const { data, error } = await supabaseClient
+    .from('bank_accounts').select('*').eq('client_id', currentProfile.id).order('created_at');
+  if (error) { console.error(error); return; }
+  myAccounts = data || [];
+
+  const grid = document.getElementById('accounts-grid');
+  grid.innerHTML = myAccounts.map(a => `
+    <div class="card">
+      <div class="muted" style="font-size:0.8rem;">${a.type_compte.replace(/_/g,' ')}</div>
+      <div style="font-family:var(--serif); font-size:1.6rem; color:var(--navy); margin:6px 0;">${formatEUR(a.solde)}</div>
+      <div class="muted" style="font-size:0.8rem;">${a.numero_compte}</div>
+      <div style="margin-top:10px;">${badge(a.statut)}</div>
+    </div>
+  `).join('') || '<p class="muted">Aucun compte pour le moment.</p>';
+
+  const sourceSelect = document.getElementById('t-source');
+  sourceSelect.innerHTML = myAccounts.map(a => `<option value="${a.id}">${a.type_compte.replace(/_/g,' ')} — ${a.numero_compte} (${formatEUR(a.solde)})</option>`).join('');
+}
+
+async function loadCards(){
+  const { data, error } = await supabaseClient
+    .from('bank_cards').select('*').eq('titulaire_id', currentProfile.id);
+  if (error) { console.error(error); return; }
+  const grid = document.getElementById('cards-grid');
+  grid.innerHTML = (data || []).map(c => `
+    <div class="card" style="background:var(--navy); color:var(--white);">
+      <div style="font-size:0.8rem; opacity:0.7;">${c.type === 'debit' ? 'Carte de débit' : 'Carte de crédit'}</div>
+      <div style="font-family:var(--serif); font-size:1.3rem; letter-spacing:0.05em; margin:14px 0;">${c.numero_masque}</div>
+      <div style="display:flex; justify-content:space-between; font-size:0.78rem; opacity:0.7;">
+        <span>Exp. ${formatDateBE(c.date_expiration)}</span><span>${c.statut}</span>
+      </div>
+    </div>
+  `).join('') || '<p class="muted">Aucune carte associée.</p>';
+}
+
+async function loadTransactions(){
+  if (!myAccounts.length) { document.getElementById('tx-body').innerHTML = '<tr><td colspan="5" class="muted">Aucun compte.</td></tr>'; return; }
+  const ids = myAccounts.map(a => a.id);
+  const { data, error } = await supabaseClient
+    .from('transactions')
+    .select('*')
+    .or(ids.map(id => `compte_source.eq.${id}`).concat(ids.map(id => `compte_destination.eq.${id}`)).join(','))
+    .order('date', { ascending:false })
+    .limit(20);
+  if (error) { console.error(error); return; }
+  const tbody = document.getElementById('tx-body');
+  tbody.innerHTML = (data || []).map(t => `
+    <tr>
+      <td>${formatDateBE(t.date)}</td>
+      <td>${t.type.replace(/_/g,' ')}</td>
+      <td>${t.description || '—'}</td>
+      <td>${formatEUR(t.montant)}</td>
+      <td>${badge(t.statut)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">Aucune transaction pour le moment.</td></tr>';
+}
+
+async function loadCredits(){
+  const { data, error } = await supabaseClient
+    .from('credits').select('*').eq('client_id', currentProfile.id).order('date_demande', { ascending:false });
+  if (error) { console.error(error); return; }
+  document.getElementById('credits-body').innerHTML = (data || []).map(c => `
+    <tr>
+      <td>${c.type_credit}</td>
+      <td>${formatEUR(c.montant_demande)}</td>
+      <td>${c.montant_accorde ? formatEUR(c.montant_accorde) : '—'}</td>
+      <td>${badge(c.statut)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="muted">Aucune demande de crédit.</td></tr>';
+}
+
+async function loadNotifCount(){
+  const { count } = await supabaseClient
+    .from('notifications').select('*', { count:'exact', head:true })
+    .eq('utilisateur_id', currentProfile.id).eq('lu', false);
+  document.getElementById('notif-count').textContent = count ? `(${count})` : '';
+}
+
+async function onTransfer(e){
+  e.preventDefault();
+  const errEl = document.getElementById('transfer-error');
+  errEl.textContent = '';
+  const sourceId = document.getElementById('t-source').value;
+  const destNumero = document.getElementById('t-dest').value.trim();
+  const montant = parseFloat(document.getElementById('t-montant').value);
+  const description = document.getElementById('t-desc').value;
+
+  const { data: destAccount, error: destErr } = await supabaseClient
+    .from('bank_accounts').select('id').eq('numero_compte', destNumero).single();
+  if (destErr || !destAccount) { errEl.textContent = "Compte destinataire introuvable."; return; }
+
+  const { error } = await supabaseClient.rpc('transfer_funds', {
+    p_source: sourceId, p_destination: destAccount.id, p_montant: montant, p_description: description
+  });
+  if (error) { errEl.textContent = error.message; return; }
+
+  toast('Virement effectué.');
+  document.getElementById('form-transfer').reset();
+  await loadAccounts();
+  await loadTransactions();
+}
+
+// Mise à jour en direct du solde et des notifications sans recharger la page
+function subscribeRealtime(){
+  supabaseClient
+    .channel('client-realtime')
+    .on('postgres_changes', { event:'*', schema:'public', table:'bank_accounts', filter:`client_id=eq.${currentProfile.id}` },
+      () => { loadAccounts(); loadTransactions(); })
+    .on('postgres_changes', { event:'*', schema:'public', table:'notifications', filter:`utilisateur_id=eq.${currentProfile.id}` },
+      (payload) => { loadNotifCount(); if (payload.eventType === 'INSERT') toast(payload.new.titre); })
+    .on('postgres_changes', { event:'*', schema:'public', table:'credits', filter:`client_id=eq.${currentProfile.id}` },
+      () => { loadCredits(); })
+    .subscribe();
+}
+
+init();
+</script>
+</body>
+</html>

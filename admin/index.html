@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Administration — PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav>
+    <span class="user" id="user-label"></span>
+    <a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a>
+  </nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html" class="active">Vue générale</a>
+    <a href="clients.html">Clients</a>
+    <a href="accounts.html">Comptes</a>
+    <a href="credits.html">Crédits</a>
+    <a href="news.html">Annonces</a>
+    <a href="branches.html">Agences</a>
+    <a href="audit.html">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="section-title"><h1>Vue générale</h1></div>
+
+    <div class="grid-4" id="stats-grid">
+      <div class="card stat"><div class="label">Clients</div><div class="value" id="s-clients">—</div></div>
+      <div class="card stat"><div class="label">Comptes</div><div class="value" id="s-accounts">—</div></div>
+      <div class="card stat"><div class="label">Argent en circulation</div><div class="value" id="s-total">—</div></div>
+      <div class="card stat"><div class="label">Transactions du jour</div><div class="value" id="s-tx-today">—</div></div>
+      <div class="card stat"><div class="label">Crédits en cours</div><div class="value" id="s-credits-actifs">—</div></div>
+      <div class="card stat"><div class="label">Demandes en attente</div><div class="value" id="s-credits-attente">—</div></div>
+      <div class="card stat"><div class="label">Agences</div><div class="value" id="s-branches">—</div></div>
+      <div class="card stat"><div class="label">Personnel</div><div class="value" id="s-staff">—</div></div>
+    </div>
+
+    <div class="section-title" style="margin-top:32px;"><h2>Dernières opérations</h2></div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Date</th><th>Type</th><th>Montant</th><th>Réalisée par</th></tr></thead>
+        <tbody id="recent-tx"><tr><td colspan="4" class="muted">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+async function init(){
+  const profile = await requireRole(['employe','responsable','directeur','administrateur']);
+  if (!profile) return;
+  document.getElementById('user-label').textContent = `${profile.prenom} ${profile.nom} · ${profile.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+
+  const [clients, accounts, allAccounts, credits, branches, staff, todayTx, recentTx] = await Promise.all([
+    supabaseClient.from('profiles').select('*', { count:'exact', head:true }).eq('role','client'),
+    supabaseClient.from('bank_accounts').select('*', { count:'exact', head:true }),
+    supabaseClient.from('bank_accounts').select('solde'),
+    supabaseClient.from('credits').select('statut'),
+    supabaseClient.from('branches').select('*', { count:'exact', head:true }),
+    supabaseClient.from('profiles').select('*', { count:'exact', head:true }).neq('role','client'),
+    supabaseClient.from('transactions').select('*', { count:'exact', head:true }).gte('date', new Date().toISOString().slice(0,10)),
+    supabaseClient.from('transactions').select('*, utilisateur:utilisateur_id(nom,prenom)').order('date', { ascending:false }).limit(10)
+  ]);
+
+  document.getElementById('s-clients').textContent = clients.count ?? '0';
+  document.getElementById('s-accounts').textContent = accounts.count ?? '0';
+  const total = (allAccounts.data || []).reduce((sum, a) => sum + Number(a.solde), 0);
+  document.getElementById('s-total').textContent = formatEUR(total);
+  document.getElementById('s-tx-today').textContent = todayTx.count ?? '0';
+  const creditsData = credits.data || [];
+  document.getElementById('s-credits-actifs').textContent = creditsData.filter(c => c.statut === 'accepte').length;
+  document.getElementById('s-credits-attente').textContent = creditsData.filter(c => c.statut === 'en_attente' || c.statut === 'en_analyse').length;
+  document.getElementById('s-branches').textContent = branches.count ?? '0';
+  document.getElementById('s-staff').textContent = staff.count ?? '0';
+
+  document.getElementById('recent-tx').innerHTML = (recentTx.data || []).map(t => `
+    <tr>
+      <td>${formatDateBE(t.date)}</td>
+      <td>${t.type.replace(/_/g,' ')}</td>
+      <td>${formatEUR(t.montant)}</td>
+      <td>${t.utilisateur ? t.utilisateur.prenom + ' ' + t.utilisateur.nom : '—'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="muted">Aucune opération.</td></tr>';
+}
+init();
+</script>
+</body>
+</html>

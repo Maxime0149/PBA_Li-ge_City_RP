@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Complète ton profil — PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  body{ display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--navy); }
+  .box{ background:var(--white); width:100%; max-width:420px; padding:38px 34px; border-radius:4px; }
+  .box h1{ font-size:1.3rem; margin-bottom:6px; }
+  .box p.sub{ color:var(--text-muted); font-size:0.9rem; margin-bottom:26px; }
+  .error{ color:var(--danger); font-size:0.85rem; margin-top:10px; display:none; }
+</style>
+</head>
+<body>
+
+<div class="box">
+  <h1>Encore une étape</h1>
+  <p class="sub">Discord ne nous donne pas ton identité RP — complète-la pour finaliser ton compte PBA.</p>
+
+  <form id="form-complete">
+    <div class="field"><label for="c-pseudo">Pseudo</label><input id="c-pseudo" required></div>
+    <div class="field"><label for="c-prenom">Prénom RP</label><input id="c-prenom" required></div>
+    <div class="field"><label for="c-nom">Nom RP</label><input id="c-nom" required></div>
+    <div class="field"><label for="c-tel">Téléphone (optionnel)</label><input id="c-tel"></div>
+    <button class="btn" type="submit" style="width:100%;">Valider mon profil</button>
+    <p class="error" id="c-error"></p>
+  </form>
+</div>
+
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script>
+async function init(){
+  // Laisse le temps au client Supabase de traiter le token OAuth dans l'URL
+  await new Promise(r => setTimeout(r, 300));
+
+  const session = await getSession();
+  if (!session) { window.location.href = 'login.html'; return; }
+
+  const profile = await getCurrentProfile();
+  if (!profile) { window.location.href = 'login.html'; return; }
+
+  // Si le profil est déjà complet (connexions suivantes), on ne repasse pas par ici
+  if (profile.nom !== 'À compléter' && profile.prenom !== 'À compléter') {
+    redirectAfterLogin(profile);
+    return;
+  }
+
+  document.getElementById('c-pseudo').value = profile.pseudo || '';
+
+  document.getElementById('form-complete').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('c-error');
+    errEl.style.display = 'none';
+
+    const { error } = await supabaseClient.from('profiles').update({
+      pseudo: document.getElementById('c-pseudo').value.trim(),
+      prenom: document.getElementById('c-prenom').value.trim(),
+      nom: document.getElementById('c-nom').value.trim(),
+      telephone: document.getElementById('c-tel').value.trim() || null
+    }).eq('id', profile.id);
+
+    if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+
+    const updated = await getCurrentProfile();
+    redirectAfterLogin(updated);
+  });
+}
+
+function redirectAfterLogin(profile){
+  window.location.href = profile.role !== 'client' ? 'admin/index.html' : 'espace-client.html';
+}
+
+init();
+</script>
+</body>
+</html>

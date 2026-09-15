@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Annonces — Administration PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav><span class="user" id="user-label"></span><a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a></nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html">Vue générale</a>
+    <a href="clients.html">Clients</a>
+    <a href="accounts.html">Comptes</a>
+    <a href="credits.html">Crédits</a>
+    <a href="news.html" class="active">Annonces</a>
+    <a href="branches.html">Agences</a>
+    <a href="audit.html">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="grid-2">
+      <div>
+        <div class="section-title"><h1>Annonces</h1></div>
+        <div id="news-list"></div>
+      </div>
+
+      <div>
+        <div class="section-title"><h2 id="form-title">Nouvelle annonce</h2></div>
+        <div class="card">
+          <form id="form-news">
+            <input type="hidden" id="news-id">
+            <div class="field"><label>Titre</label><input id="news-titre" required></div>
+            <div class="field"><label>Contenu</label><textarea id="news-contenu" rows="6" required></textarea></div>
+            <div class="field"><label>Image (URL, optionnel)</label><input id="news-image"></div>
+            <div class="field">
+              <label>Statut</label>
+              <select id="news-statut">
+                <option value="brouillon">Brouillon</option>
+                <option value="publie">Publié</option>
+                <option value="depublie">Dépublié</option>
+              </select>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <button class="btn" type="submit">Enregistrer</button>
+              <button class="btn btn-ghost" type="button" id="btn-reset">Nouvelle annonce</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+let me = null;
+
+async function init(){
+  me = await requireRole(['employe','responsable','directeur','administrateur']);
+  if (!me) return;
+  document.getElementById('user-label').textContent = `${me.prenom} ${me.nom} · ${me.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+  document.getElementById('form-news').addEventListener('submit', saveNews);
+  document.getElementById('btn-reset').addEventListener('click', resetForm);
+  await loadNews();
+}
+
+async function loadNews(){
+  const { data, error } = await supabaseClient.from('news').select('*').order('created_at', { ascending:false });
+  if (error) { console.error(error); return; }
+  document.getElementById('news-list').innerHTML = (data || []).map(n => `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="section-title" style="margin-bottom:6px;">
+        <h3 style="font-size:1rem;">${n.titre}</h3>
+        <span class="badge badge-${n.statut === 'publie' ? 'ok' : n.statut === 'depublie' ? 'danger' : 'neutral'}">${n.statut}</span>
+      </div>
+      <p class="muted" style="font-size:0.85rem;">${n.contenu.slice(0,140)}${n.contenu.length > 140 ? '…' : ''}</p>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button class="btn btn-sm btn-ghost" data-action="edit" data-id="${n.id}">Modifier</button>
+        <button class="btn btn-sm btn-danger" data-action="delete" data-id="${n.id}">Supprimer</button>
+      </div>
+    </div>
+  `).join('') || '<p class="muted">Aucune annonce.</p>';
+
+  document.querySelectorAll('[data-action="edit"]').forEach(btn =>
+    btn.addEventListener('click', () => loadForEdit(btn.dataset.id)));
+  document.querySelectorAll('[data-action="delete"]').forEach(btn =>
+    btn.addEventListener('click', () => deleteNews(btn.dataset.id)));
+}
+
+async function loadForEdit(id){
+  const { data, error } = await supabaseClient.from('news').select('*').eq('id', id).single();
+  if (error) return;
+  document.getElementById('form-title').textContent = 'Modifier l\'annonce';
+  document.getElementById('news-id').value = data.id;
+  document.getElementById('news-titre').value = data.titre;
+  document.getElementById('news-contenu').value = data.contenu;
+  document.getElementById('news-image').value = data.image_url || '';
+  document.getElementById('news-statut').value = data.statut;
+}
+
+function resetForm(){
+  document.getElementById('form-news').reset();
+  document.getElementById('news-id').value = '';
+  document.getElementById('form-title').textContent = 'Nouvelle annonce';
+}
+
+async function saveNews(e){
+  e.preventDefault();
+  const id = document.getElementById('news-id').value;
+  const payload = {
+    titre: document.getElementById('news-titre').value,
+    contenu: document.getElementById('news-contenu').value,
+    image_url: document.getElementById('news-image').value || null,
+    statut: document.getElementById('news-statut').value,
+    auteur_id: me.id,
+    date_publication: document.getElementById('news-statut').value === 'publie' ? new Date().toISOString() : null
+  };
+
+  const { error } = id
+    ? await supabaseClient.from('news').update(payload).eq('id', id)
+    : await supabaseClient.from('news').insert(payload);
+
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Annonce enregistrée.');
+  resetForm();
+  loadNews();
+}
+
+async function deleteNews(id){
+  if (!confirm('Supprimer cette annonce ?')) return;
+  const { error } = await supabaseClient.from('news').delete().eq('id', id);
+  if (error) { toast('Erreur : ' + error.message); return; }
+  toast('Annonce supprimée.');
+  loadNews();
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clients — Administration PBA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  .split{ display:grid; grid-template-columns:340px 1fr; gap:24px; align-items:start; }
+  .client-row{ padding:12px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .client-row:hover{ background:var(--bg-alt); }
+  .client-row.active{ background:var(--bg-alt); border-left:3px solid var(--bronze); }
+  @media (max-width:900px){ .split{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="brand">PBA — Administration</div>
+  <nav><span class="user" id="user-label"></span><a href="#" id="btn-logout" class="btn btn-sm btn-ghost">Déconnexion</a></nav>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <a href="index.html">Vue générale</a>
+    <a href="clients.html" class="active">Clients</a>
+    <a href="accounts.html">Comptes</a>
+    <a href="credits.html">Crédits</a>
+    <a href="news.html">Annonces</a>
+    <a href="branches.html">Agences</a>
+    <a href="audit.html">Journal d'audit</a>
+  </div>
+
+  <div class="content">
+    <div class="section-title"><h1>Clients</h1></div>
+    <div class="field" style="max-width:420px;">
+      <input id="search" placeholder="Rechercher par nom, prénom, pseudo ou numéro client…">
+    </div>
+
+    <div class="split" style="margin-top:20px;">
+      <div class="card" style="padding:0;">
+        <div id="client-list"></div>
+      </div>
+
+      <div id="client-detail" class="card">
+        <p class="muted">Sélectionne un client dans la liste pour voir sa fiche.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/config.js"></script>
+<script src="../assets/auth.js"></script>
+<script>
+let me = null;
+let selectedClientId = null;
+
+async function init(){
+  me = await requireRole(['employe','responsable','directeur','administrateur']);
+  if (!me) return;
+  document.getElementById('user-label').textContent = `${me.prenom} ${me.nom} · ${me.role}`;
+  document.getElementById('btn-logout').addEventListener('click', (e) => { e.preventDefault(); signOut(); });
+  document.getElementById('search').addEventListener('input', (e) => loadClientList(e.target.value));
+  await loadClientList('');
+}
+
+async function loadClientList(query){
+  let q = supabaseClient.from('profiles').select('*').eq('role','client').order('nom').limit(50);
+  if (query) {
+    q = q.or(`nom.ilike.%${query}%,prenom.ilike.%${query}%,pseudo.ilike.%${query}%,numero_client.ilike.%${query}%`);
+  }
+  const { data, error } = await q;
+  if (error) { console.error(error); return; }
+  document.getElementById('client-list').innerHTML = (data || []).map(c => `
+    <div class="client-row ${c.id === selectedClientId ? 'active' : ''}" data-id="${c.id}">
+      <div style="font-weight:600;">${c.prenom} ${c.nom}</div>
+      <div class="muted" style="font-size:0.82rem;">${c.numero_client} · @${c.pseudo}</div>
+    </div>
+  `).join('') || '<p class="muted" style="padding:14px;">Aucun résultat.</p>';
+
+  document.querySelectorAll('.client-row').forEach(row => {
+    row.addEventListener('click', () => openClient(row.dataset.id));
+  });
+}
+
+async function openClient(clientId){
+  selectedClientId = clientId;
+  document.querySelectorAll('.client-row').forEach(r => r.classList.toggle('active', r.dataset.id === clientId));
+
+  const [{ data: client }, { data: accounts }, { data: cards }, { data: credits }, { data: notes }] = await Promise.all([
+    supabaseClient.from('profiles').select('*').eq('id', clientId).single(),
+    supabaseClient.from('bank_accounts').select('*').eq('client_id', clientId),
+    supabaseClient.from('bank_cards').select('*').eq('titulaire_id', clientId),
+    supabaseClient.from('credits').select('*').eq('client_id', clientId),
+    supabaseClient.from('client_notes').select('*, auteur:auteur_id(nom,prenom)').eq('client_id', clientId).order('created_at', { ascending:false })
+  ]);
+
+  const detail = document.getElementById('client-detail');
+  detail.innerHTML = `
+    <div class="section-title">
+      <h2>${client.prenom} ${client.nom}</h2>
+      <div>
+        <span class="badge ${client.statut === 'actif' ? 'badge-ok' : 'badge-danger'}">${client.statut}</span>
+      </div>
+    </div>
+    <p class="muted">${client.numero_client} · @${client.pseudo} · ${client.telephone || '—'}</p>
+    <p class="muted">${client.adresse || '—'} · Né(e) le ${formatDateBE(client.date_naissance)}</p>
+    <p class="muted">Client depuis le ${formatDateBE(client.date_creation)}</p>
+
+    <div style="margin-top:16px;">
+      <button class="btn btn-sm ${client.statut === 'actif' ? 'btn-danger' : ''}" id="btn-toggle-status">
+        ${client.statut === 'actif' ? 'Suspendre ce client' : 'Réactiver ce client'}
+      </button>
+    </div>
+
+    <h3 style="margin-top:26px; font-size:1rem;">Comptes (${(accounts||[]).length})</h3>
+    <table style="margin-top:8px;">
+      <thead><tr><th>N°</th><th>Type</th><th>Solde</th><th>Statut</th></tr></thead>
+      <tbody>${(accounts||[]).map(a => `<tr><td>${a.numero_compte}</td><td>${a.type_compte.replace(/_/g,' ')}</td><td>${formatEUR(a.solde)}</td><td>${a.statut}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucun compte</td></tr>'}</tbody>
+    </table>
+
+    <h3 style="margin-top:22px; font-size:1rem;">Cartes (${(cards||[]).length})</h3>
+    <table style="margin-top:8px;">
+      <thead><tr><th>Numéro</th><th>Type</th><th>Expiration</th><th>Statut</th></tr></thead>
+      <tbody>${(cards||[]).map(c => `<tr><td>${c.numero_masque}</td><td>${c.type}</td><td>${formatDateBE(c.date_expiration)}</td><td>${c.statut}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucune carte</td></tr>'}</tbody>
+    </table>
+
+    <h3 style="margin-top:22px; font-size:1rem;">Crédits (${(credits||[]).length})</h3>
+    <table style="margin-top:8px;">
+      <thead><tr><th>Type</th><th>Demandé</th><th>Accordé</th><th>Statut</th></tr></thead>
+      <tbody>${(credits||[]).map(c => `<tr><td>${c.type_credit}</td><td>${formatEUR(c.montant_demande)}</td><td>${c.montant_accorde ? formatEUR(c.montant_accorde) : '—'}</td><td>${c.statut}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Aucun crédit</td></tr>'}</tbody>
+    </table>
+
+    <h3 style="margin-top:22px; font-size:1rem;">Notes internes</h3>
+    <div id="notes-list" style="margin:10px 0;">
+      ${(notes||[]).map(n => `<div class="card" style="margin-bottom:8px; padding:10px 14px;"><div style="font-size:0.85rem;">${n.contenu}</div><div class="muted" style="font-size:0.75rem; margin-top:4px;">${n.auteur.prenom} ${n.auteur.nom} · ${formatDateBE(n.created_at)}</div></div>`).join('') || '<p class="muted">Aucune note.</p>'}
+    </div>
+    <form id="form-note" style="display:flex; gap:8px;">
+      <input id="note-content" placeholder="Ajouter une note…" style="flex:1;">
+      <button class="btn btn-sm" type="submit">Ajouter</button>
+    </form>
+  `;
+
+  document.getElementById('btn-toggle-status').addEventListener('click', async () => {
+    const newStatus = client.statut === 'actif' ? 'suspendu' : 'actif';
+    const { error } = await supabaseClient.from('profiles').update({ statut: newStatus }).eq('id', clientId);
+    if (error) { toast('Erreur : ' + error.message); return; }
+    toast('Statut du client mis à jour.');
+    openClient(clientId);
+  });
+
+  document.getElementById('form-note').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const content = document.getElementById('note-content').value.trim();
+    if (!content) return;
+    const { error } = await supabaseClient.from('client_notes').insert({ client_id: clientId, auteur_id: me.id, contenu: content });
+    if (error) { toast('Erreur : ' + error.message); return; }
+    openClient(clientId);
+  });
+}
+
+init();
+</script>
+</body>
+</html>
